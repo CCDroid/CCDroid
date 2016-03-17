@@ -1,5 +1,5 @@
-/**
- * CCDroid - An open source build monitor for Android
+/*
+ * MainActivity.java
  *
  * Copyright (c) 2015 Shubham Chaudhary <me@shubhamchaudhary.in>
  *
@@ -15,6 +15,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with CCDroid.  If not, see <http://www.gnu.org/licenses/>.
+ *
  */
 package org.developfreedom.ccdroid.app;
 
@@ -28,28 +29,36 @@ import android.support.v4.widget.DrawerLayout;
 import android.support.v4.widget.SwipeRefreshLayout;
 import android.support.v7.app.ActionBar;
 import android.support.v7.app.ActionBarActivity;
-import android.util.Log;
+import android.text.InputType;
 import android.view.*;
 import android.widget.EditText;
 import android.widget.ListView;
 import android.widget.SimpleAdapter;
 import android.widget.Toast;
+import com.crashlytics.android.Crashlytics;
+import io.fabric.sdk.android.Fabric;
+import org.developfreedom.ccdroid.app.controllers.ListViewController;
+import org.developfreedom.ccdroid.app.controllers.ProjectStorageController;
 import org.developfreedom.ccdroid.app.listeners.ListViewItemClickListener;
+import org.developfreedom.ccdroid.app.storage.ProviderController;
 import org.developfreedom.ccdroid.app.tasks.DownloadXmlTask;
+import org.developfreedom.ccdroid.app.utils.LogUtils;
 import org.developfreedom.ccdroid.app.utils.Utils;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 
+import static org.developfreedom.ccdroid.app.utils.LogUtils.*;
+
 
 public class MainActivity
         extends ActionBarActivity
         implements
         NavigationDrawerFragment.NavigationDrawerCallbacks,
-        OnDownloadTaskCompleted {
+        ListViewController {
 
-    private static String TAG = MainActivity.class.getSimpleName();
+    private static String TAG = LogUtils.makeLogTag(MainActivity.class);
     /**
      * Fragment managing the behaviors, interactions and presentation of the navigation drawer.
      */
@@ -61,10 +70,12 @@ public class MainActivity
     private ListView projectsListView;
     private Config config;
     private SwipeRefreshLayout swipeRefreshLayout;
+    private ProjectStorageController mProjectStorageController;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        Fabric.with(this, new Crashlytics());
         setContentView(R.layout.activity_main);
 
         mNavigationDrawerFragment = (NavigationDrawerFragment)
@@ -76,11 +87,13 @@ public class MainActivity
                 R.id.navigation_drawer,
                 (DrawerLayout) findViewById(R.id.drawer_layout));
         config = new Config(this);
+        mProjectStorageController = new ProviderController(getContentResolver());
     }
 
     @Override
     protected void onStart() {
         super.onStart();
+        updateListView();
         swipeRefreshLayout = (SwipeRefreshLayout) findViewById(R.id.main_swipe_refresh_layout);
         swipeRefreshLayout.setOnRefreshListener(new SwipeRefreshLayout.OnRefreshListener() {
             @Override
@@ -150,7 +163,7 @@ public class MainActivity
         }
 
         if (item.getItemId() == R.id.action_add_url) {
-            show_add_url_dialog();
+            showAddUrlDialog();
         }
 
         return super.onOptionsItemSelected(item);
@@ -158,19 +171,19 @@ public class MainActivity
 
     public void refresh() {
         swipeRefreshLayout.setRefreshing(true);
-        Log.v(TAG, "Refreshing");
+        LOGD(TAG, "Refreshing");
         if (Utils.isOnline(this)) {
             // fetch data
             String projectUrl = config.getUrl();
-            DownloadXmlTask downloadXmlTask = new DownloadXmlTask(this, new ProjectParser());
+            DownloadXmlTask downloadXmlTask = new DownloadXmlTask(new ProjectParser(), this, mProjectStorageController);
             downloadXmlTask.execute(projectUrl);
         } else {
-            Log.v(TAG, "refresh: No Network");
+            LOGI(TAG, "refresh: No Network");
             Toast.makeText(this, getString(R.string.toast_network_unavailable), Toast.LENGTH_SHORT).show();
         }
     }
 
-    private void show_add_url_dialog() {
+    private void showAddUrlDialog() {
         // 1. Instantiate an AlertDialog.Builder with its constructor
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
 
@@ -179,6 +192,7 @@ public class MainActivity
                 .setTitle(R.string.dialog_title_add_url);
 
         final EditText input = new EditText(this);
+        input.setInputType(InputType.TYPE_TEXT_VARIATION_URI);
         input.setText(config.getUrl());
         builder.setView(input);
 
@@ -201,19 +215,25 @@ public class MainActivity
         dialog.show();
     }
 
+    @Override
+    public void updateListView() {
+        updateListView(mProjectStorageController.get());
+    }
+
+    @Override
     public void updateListView(List<Project> projects) {
         if (projects == null) {
             Toast.makeText(this, getString(R.string.toast_unable_to_fetch_project_list), Toast.LENGTH_SHORT).show();
-            Log.d(TAG, "Error: project list came empty");
+            LOGE(TAG, "Error: project list came empty");
             return;
         }
-        Log.v(TAG, "Starting listview update");
+        LOGD(TAG, "Starting listview update");
         SimpleAdapter adapter = getAdapterFor(projects);
 
         projectsListView = (ListView) findViewById(R.id.fragment_listview_projects);
 
         projectsListView.setAdapter(adapter);
-        Log.v(TAG, "Adapter set to projects listview has " + adapter.getCount() + " items");
+        LOGD(TAG, "Adapter set to projects listview has " + adapter.getCount() + " items");
 
         projectsListView.setOnItemClickListener(
                 new ListViewItemClickListener(
@@ -221,7 +241,9 @@ public class MainActivity
                         this
                 )
         );
-        swipeRefreshLayout.setRefreshing(false);
+        if (swipeRefreshLayout != null && swipeRefreshLayout.isRefreshing()) {
+            swipeRefreshLayout.setRefreshing(false);
+        }
     }
 
     private SimpleAdapter getAdapterFor(List<Project> projects) {
@@ -245,12 +267,16 @@ public class MainActivity
         }
 
         String[] keysInDataHashmap = {
+                "activity",
                 "flag",
                 "name",
+                "time",
         };
         int[] valuesIdInListviewLayout = {
+                R.id.lw_project_activity,
                 R.id.lw_status_flag,
                 R.id.lw_project_name,
+                R.id.lw_project_time,
         };
 
         SimpleAdapter adapter = new SimpleAdapter(
